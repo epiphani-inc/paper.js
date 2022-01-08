@@ -126,7 +126,6 @@ var Path = PathItem.extend(/** @lends Path# */{
         this._initialize(!segments && arg);
     },
     freehand: function() {
-        console.log("SET FREEHAND")
         this._freehand = true
     }, 
 
@@ -2374,7 +2373,6 @@ new function() { // Scope for drawing
             prevX, prevY,
             inX, inY,
             outX, outY;
-        console.log("DRAW SEG")
         function midPointBtw(p1, p2) {
                 return {
                     x: p1.x + (p2.x - p1.x) / 2,
