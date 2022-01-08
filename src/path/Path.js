@@ -125,6 +125,10 @@ var Path = PathItem.extend(/** @lends Path# */{
         // Only pass on arg as props if it wasn't consumed for segments already.
         this._initialize(!segments && arg);
     },
+    freehand: function() {
+        console.log("SET FREEHAND")
+        this._freehand = true
+    }, 
 
     _equals: function(item) {
         return this._closed === item._closed
@@ -441,6 +445,138 @@ var Path = PathItem.extend(/** @lends Path# */{
         return segs;
     },
 
+     /**
+     * Private method that adds segments to the segment list. It assumes that
+     * the passed object is an array of segments already and does not perform
+     * any checks. It draws inline without waiting for refresh
+     */
+      _addInline: function(ctx, segs, index) {
+        // Local short-cuts:
+
+        var segments = this._segments,
+            curves = this._curves,
+            amount = segs.length,
+            append = index == null,
+            index = append ? segments.length : index;
+        // Scan through segments to add first, convert if necessary and set
+        // _path and _index references on them.
+        for (var i = 0; i < amount; i++) {
+            var segment = segs[i];
+            // If the segments belong to another path already, clone them before
+            // adding:
+            if (segment._path)
+                segment = segs[i] = segment.clone();
+            segment._path = this;
+            segment._index = index + i;
+            // If parts of this segment are selected, adjust the internal
+            // _segmentSelection now
+            if (segment._selection)
+                this._updateSelection(segment, 0, segment._selection);
+        }
+        if (append) {
+            // Append them all at the end.
+            Base.push(segments, segs);
+        } 
+         // Keep the curves list in sync all the time in case it was requested
+        // already.
+        if (curves) {
+            var total = this._countCurves(),
+                // If we're adding a new segment to the end of an open path,
+                // we need to step one index down to get its curve.
+                start = index > 0 && index + amount - 1 === total ? index - 1
+                    : index,
+                insert = start,
+                end = Math.min(start + amount, total);
+            if (segs._curves) {
+                // Reuse removed curves.
+                curves.splice.apply(curves, [start, 0].concat(segs._curves));
+                insert += segs._curves.length;
+            }
+            // Insert new curves, but do not initialize their segments yet,
+            // since #_adjustCurves() handles all that for us.
+            for (var i = insert; i < end; i++)
+                curves.splice(i, 0, new Curve(this, null, null));
+            // Adjust segments for the curves before and after the removed ones
+            this._adjustCurves(start, end);
+        }
+        this.drawSegments(ctx, this, null);
+
+        return segs;
+    },
+
+    drawSegments: function (ctx, path, matrix) {
+        var segments = path._segments,
+            length = segments.length,
+            coords = new Array(6),
+            first = true,
+            curX, curY,
+            prevX, prevY,
+            inX, inY,
+            outX, outY;
+        ctx.beginPath();
+        function midPointBtw(p1, p2) {
+            return {
+                x: p1.x + (p2.x - p1.x) / 2,
+                y: p1.y + (p2.y - p1.y) / 2
+            };
+        }
+
+        function drawSegment(segment, last) {
+            // Optimise code when no matrix is provided by accessing segment
+            // points hand handles directly, since this is the default when
+            // drawing paths. Matrix is only used for drawing selections and
+            // when #strokeScaling is false.
+            if (matrix) {
+                segment._transformCoordinates(matrix, coords);
+                curX = coords[0];
+                curY = coords[1];
+            } else {
+                var point = segment._point;
+                curX = point._x;
+                curY = point._y;
+            }
+            if (first) {
+                ctx.moveTo(curX, curY);
+                first = false;
+            } else {
+                if (matrix) {
+                    inX = coords[2];
+                    inY = coords[3];
+                } else {
+                    var handle = segment._handleIn;
+                    inX = curX + handle._x;
+                    inY = curY + handle._y;
+                }
+                if (inX === curX && inY === curY
+                        && outX === prevX && outY === prevY) {
+                    if (path._freehand) {
+                        var midPoint = midPointBtw({x: prevX, y: prevY}, {x: curX, y: curY})
+                        ctx.quadraticCurveTo(prevX, prevY, midPoint.x, midPoint.y);
+                    } else {
+                        ctx.lineTo(curX, curY);
+                    }
+                } else {
+                    ctx.bezierCurveTo(outX, outY, inX, inY, curX, curY);
+                }
+            }
+            prevX = curX;
+            prevY = curY;
+            if (matrix) {
+                outX = coords[4];
+                outY = coords[5];
+            } else {
+                var handle = segment._handleOut;
+                outX = prevX + handle._x;
+                outY = prevY + handle._y;
+            }
+        }
+
+        for (var i = 0; i < length; i++)
+            drawSegment(segments[i], i === length - 1);
+        // Close path by drawing first segment again
+        if (path._closed && length > 0)
+            drawSegment(segments[0]);
+    }, 
     /**
      * Adjusts segments of curves before and after inserted / removed segments.
      */
@@ -557,6 +693,11 @@ var Path = PathItem.extend(/** @lends Path# */{
             : this._add([ Segment.read(args) ])[0];
     },
 
+    addPointNoDraw: function(ctx, segment1 /*, segment2, ... */) {
+        var args = arguments;
+
+        this._addInline(ctx, [ new Segment(segment1) ])
+    },
     /**
      * Inserts one or more segments at a given index in the list of this path's
      * segments.
@@ -2233,8 +2374,14 @@ new function() { // Scope for drawing
             prevX, prevY,
             inX, inY,
             outX, outY;
-
-        function drawSegment(segment) {
+        console.log("DRAW SEG")
+        function midPointBtw(p1, p2) {
+                return {
+                    x: p1.x + (p2.x - p1.x) / 2,
+                    y: p1.y + (p2.y - p1.y) / 2
+                };
+            }
+        function drawSegment(segment, last) {
             // Optimise code when no matrix is provided by accessing segment
             // points hand handles directly, since this is the default when
             // drawing paths. Matrix is only used for drawing selections and
@@ -2262,7 +2409,12 @@ new function() { // Scope for drawing
                 }
                 if (inX === curX && inY === curY
                         && outX === prevX && outY === prevY) {
-                    ctx.lineTo(curX, curY);
+                            if (path._freehand && !last) {
+                                var midPoint = midPointBtw({x: prevX, y: prevY}, {x: curX, y: curY})
+                                ctx.quadraticCurveTo(prevX, prevY, midPoint.x, midPoint.y);
+                            } else {
+                                ctx.lineTo(curX, curY);
+                            }
                 } else {
                     ctx.bezierCurveTo(outX, outY, inX, inY, curX, curY);
                 }
@@ -2280,7 +2432,7 @@ new function() { // Scope for drawing
         }
 
         for (var i = 0; i < length; i++)
-            drawSegment(segments[i]);
+            drawSegment(segments[i], i === length - 1);
         // Close path by drawing first segment again
         if (path._closed && length > 0)
             drawSegment(segments[0]);

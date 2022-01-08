@@ -88,6 +88,10 @@ var CanvasView = View.extend(/** @lends CanvasView# */{
         }
     },
 
+    freeze: function(on) {
+        console.log("FREEZE ON", on)
+        this._freeze = on 
+    },
     getContext: function() {
         return this._context;
     },
@@ -126,6 +130,9 @@ var CanvasView = View.extend(/** @lends CanvasView# */{
         return width;
     },
 
+	freeze: function(on) {
+		this._freeze = on
+	},
     /**
      * Updates the view if there are changes. Note that when using built-in
      * event handlers for interaction, animation and load events, this method is
@@ -136,6 +143,9 @@ var CanvasView = View.extend(/** @lends CanvasView# */{
     update: function() {
         if (!this._needsUpdate)
             return false;
+        if (this._freeze) {
+			return false;
+		}
         var project = this._project,
             ctx = this._context,
             size = this._viewSize;
